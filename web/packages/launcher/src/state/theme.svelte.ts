@@ -15,14 +15,18 @@ function prefersLight(): boolean {
   }
 }
 
-function initialTheme(): Theme {
+function storedTheme(): Theme | null {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === "dark" || stored === "light") return stored;
   } catch {
     // Storage unavailable (private mode): fall through to the system default.
   }
-  return prefersLight() ? "light" : "dark";
+  return null;
+}
+
+function initialTheme(): Theme {
+  return storedTheme() ?? (prefersLight() ? "light" : "dark");
 }
 
 export const themeState = $state<{ theme: Theme }>({ theme: initialTheme() });
@@ -65,6 +69,33 @@ async function putLocalTheme(theme: Theme): Promise<void> {
   } catch {
     // Network or store-less surface: the in-memory + cached toggle still stands.
   }
+}
+
+/**
+ * Follow the system appearance while the user has made no choice of their
+ * own. The theme is otherwise read once at load, so a phone switched to dark
+ * (by hand, or at sunset) would keep the launcher light until the app is
+ * killed. A stored choice, a toggle or the desktop config's value, wins and
+ * stops the following; it is checked at each change rather than once, since
+ * the choice can be made after this starts.
+ */
+export function watchSystemTheme(): () => void {
+  let query: MediaQueryList;
+  try {
+    if (typeof matchMedia !== "function") return () => {};
+    query = matchMedia("(prefers-color-scheme: light)");
+  } catch {
+    return () => {};
+  }
+  const onChange = (event: MediaQueryListEvent): void => {
+    if (storedTheme() !== null) return;
+    const theme: Theme = event.matches ? "light" : "dark";
+    if (theme === themeState.theme) return;
+    themeState.theme = theme;
+    applyTheme();
+  };
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
 }
 
 export function toggleTheme(): void {
